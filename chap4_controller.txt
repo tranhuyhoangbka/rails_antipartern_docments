@@ -1,0 +1,139 @@
+1, AntiPattern: Homemade Keys
+
+2 gem for authen:
+
+1.1, Solution: Use Clearance
+1.2, Solution: Use Authlogic
+
+2, AntiPattern: Fat Controller
+
+2.1, Solution: Use Active Record Callbacks and Setters
+
+1 controller action có 14 dòng dường như là quá nhiều, việc xử lý nhiều logic trong action controller là tín hiệu cho biết
+bạn có thể thực hiện tốt hơn trong model layer 
+
+transaction ko nên được dùng trong controller bởi controller không nên có nhiều trạng thái , transaction cũng được đi kèm
+với các model callback vì vậy có thể dùng để thay thế 
+
+nhiều logic trong transaction phụ thuộc vào nhau có thể chuyển sang dùng callback và setter trong model 
+
+Exception ko nên dùng trong controller trừ 1 số trường hợp ngoại lệ
+
+
+class Article < ActiveRecord::Base
+  def new_version=(version_attributes)
+    @new_version = versions.build(version_attributes)
+  end
+
+  def new_version
+    @new_version
+  end
+end
+
+
+ou can then nest the
+form inputs for a version underneath the form elements for an article so that they appear
+in the params as params[:article][:new_version] instead of params[:version] .
+If you name the nested params in this way, the params values will be passed directly to
+the new_version setter by the call to Article.new
+
+@article = Article.new(params[:article])
+
+
+3, Solution: Move to a Presenter
+
+gem này hiện tại ko dùng được nữa 
+
+Model-View-Presenter (MVP) pattern
+
+presenter là nằm giữa cả 3 tầng model, view, controller 
+
+presenter là 1 class ruby mà phối hợp việc tạo của nhiều model , nó có thể làm các việc khác như gửi mail, trigger các events khác mà bình thường sẽ được thực hiện trong action của controller 
+
+Tốt nhất, là 1 presenter nên bắt chước 1 single active record model 
+
+http://github.com/jamesgolick/active_presenter
+
+4, AntiPattern: Bloated Sessions (session béo phị :))
+
+Nhìn chung tư tuognwr cho rails app là mỗi request nên có tính chất độc lập ko nên phụ thuộc vào các request trước và request tương lai, và chứa đầy đủ thông tin cần để hoàn thành request 
+
+thông thường session dùng để lưu thông tin user login hoặc các step của 1 hành động gì đó, thông tin sẽ được duy trì qua các request
+trong cùng client 
+nói cách khác là mặc định trong rails thì session là stateless chứ ko phải là stateful, tất cả data của session được lưu ở client side, trong cookies 
+mặc định thì trong rails session store và cookie store sẽ lưu max là 4K data (khoảng 2000 chars)
+
+
+4.1, Solution: Store References Instead of Instances
+
+việc dùng session thích hợp cho 1 small flow với 2 hoặc 3 steps và app có yêu cầu rằng object chưa được lưu vào db nếu các step chưa được hoàn thành
+
+với flow phức tạp và liên quan tới nhiều model có nhiều step thì nên lưu mọi thứ vào database 
+
+5, AntiPattern: Monolithic Controllers (controller nguyên khối )
+
+Dùng RESTful thay vì dùng các action hoang dã khác , hoặc thêm param tới url 
+
+dùng member, collect, nested resouces để chuyển sang RESTful, dùng RESTful có nhiều lợi ích như vấn đề tổ chức code
+
+6, AntiPattern: Controller of Many Faces
+
+khi ứng dụng lớn lên thì các controller thường có ` số non-RESTful action, trường hợp này cần phải hạn chế tối đa có thể 
+
+
+6.1, Solution: Refactor Non-RESTful Actions into a Separate Controller
+
+7, AntiPattern: A Lost Child Controller
+
+RESTful resources nhìn chung luôn song song với các model chúng đại diện 
+
+7.1, Solution: Make Use of Nested Resources
+
+7.2, Solution: Use Separate Controllers for Each Nesting
+khi logic trong view tằng lên thì nên tách nesting thành nhiều controllers
+
+resources :messages
+resources :users do
+  resources :messages, :controller => ‘users/messages’
+end
+
+controllers/messages_controller.rb
+controllers/users/messages_controller.rb
+
+7.3, AntiPattern: Evil Twin Controllers
+
+def update
+  @song = songs.find(params[:id])
+  respond_to do |format|
+    if @song.update_attributes(params[:song])
+      format.html do
+        redirect_to(@song, :notice => 'Song was successfully updated.')
+      end
+      format.xml { head :ok }
+    else
+      format.html { render :action => "edit" }
+      format.xml do
+        render :xml => @song.errors, :status => :unprocessable_entity
+      end
+    end
+  end
+end
+
+Dùng respond_to, và response_with để giảm thiểu code 
+
+class SongsController < ApplicationController
+  respond_to :html, :xml
+  ...
+
+  def update
+    @song = songs.find(params[:id])
+    if @song.update_attributes(params[:song])
+      flash[:notice] = 'Song was successfully updated.'
+    end
+    respond_with(@song)
+  end
+end
+
+hành vi của controller ko hề thay đổi, nhưng code simple hơn 
+
+

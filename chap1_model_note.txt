@@ -1,0 +1,220 @@
+Một rails template với rất nhiều tiện ích hay: https://github.com/thoughtbot/suspenders
+
+1, Chú ý là không chain quá 2 method tới object
+Liên quan tới việc khi maintain phải sửa nhiều chỗ
+
+nếu phải chain nhiều method để lấy được dữ liệu thì hãy tạo 1 method mới 
+hoặc dùng delegate
+
+2, Đơn giản hóa 1 model
+- đưa logic phức tạp vào  module và class
+
+3, Đưa code vào các module
+Từ rails 2.2 thì các module trong lib/ không tự động được require . 
+
+# config/initializers/requires.rb
+Dir[File.join(Rails.root, 'lib', '*.rb')].each do |f|
+  require f
+end
+
+4, Dùng assocition và scope để khử spaghety SQL
+
+class Pet < ActiveRecord::Base
+  has_many :toys do
+    def cute
+      where(:cute => true)
+    end
+  end
+end
+
+=> @pet.toys.cute
+
+a) Có thể extend một module khi mà định nghĩa 1 assocition và các methods trong module sẽ trở thành method của association
+
+module ToyAssocationMethods
+  def cute
+    where(:cute => true)
+  end
+end
+
+class Pet < ActiveRecord::Base
+  has_many :toys, :extend => ToyAssocationMethods
+end
+
+class Owner < ActiveRecord::Base
+  has_many :toys, :extend => ToyAssocationMethods
+end
+
+=> @pet.toys.cute
+
+***
+Tuy nhiên hai cách trên hoàn toàn có thể dùng chain scope để thay thế 
+
+Dùng Association methods hoặc extend module là cần thiết khi trong finder muốn biết chi tiết của object cha
+giải pháp là dùng proxy_owner method 
+
+class Toy < ActiveRecord::Base
+# has column :minimum_age
+end
+
+class Pet < ActiveRecord::Base
+# has column :age
+
+  has_many :toys do
+    def appropriate
+      where(["minimum_age < ?", proxy_owner.age])
+    end
+  end
+end
+
+pet.toys.appropriate sẽ trả về các toys mà có minimum_age nhỏ hơn tuổi của pet 
+
+5, Đẩy mạnh việc dùng scope
+
+Scopes are an implementation of the Virtual Proxy design pattern
+
+scope với 1 tham số:
+
+scope :top, lambda {|l| limit(l)}
+
+6, DRY Principle
+
+6.1, dùng module 
+cách đơn giản nhất trong 3 cách để dry code là dùng module 
+
+# lib/drivable.rb
+
+module Drivable
+  extend ActiveSupport::Concern
+  included do
+    validates :direction, :presence => true
+    validates :speed, :presence => true
+  end
+
+  def turn(new_direction)
+    self.direction = new_direction
+  end
+
+  def brake
+    self.speed = 0
+  end
+
+  def accelerate
+    self.speed = speed + 10
+  end
+end
+
+code trong included chỉ chạy khi mà module đã được included vào trong class, khi đó ta có thể dùng các validate, các thử liên quan tới, model
+association của models ...
+
+class Car << ActiveRecord::Base
+  include Drivable
+  # Other, car-related activities...
+end
+
+Module là mềm dẻo hơn dùng super class vì 1 class có thể include nhiều module trong khi đó nó chỉ extend được 1 super class 
+
+**************************************8*******
+6.2, development of a Ruby on Rails plugin (Tạo GEM)
+
+Chỉ tạo plugin khi cách giải quyết rât very good đồng thời muốn share để dùng qua nhiều apps , cũng như chia sẻ ra cộng đồng để nhiều người sử dụng 
+
+
+
+
+6.3, Dùng metaprogramming trick 
+Để chuyển vị trí của code cũng như giảm số lượng dòng code 
+
+
+Là cách DRY code với  highly dynamic languages
+
+Tư tưởng là : "code sinh ra code " tức là class, methods được sinh ra trong quá trình runtime 
+
+class Purchase < ActiveRecord::Base
+  STATUSES = %w(in_progress submitted approved shipped received)
+  validates_presence_of :status
+  validates_inclusion_of :status, :in => STATUSES
+
+  # Status Finders
+  class << self
+    STATUSES.each do |status_name|
+      define_method "all_#{status_name}"
+        where(:status => status_name)
+      end
+    end
+  end
+
+  # Status Accessors
+  STATUSES.each do |status_name|
+    define_method "#{status_name}?"
+      status == status_name
+    end
+  end
+end
+
+*** Dùng cách này thì gặp phải vấn đề của reablity
+
+Có cách khác là kết hợp dùng 1 macro, nó là 1 class method mà được thêm vào tại thời điểm defintion class (model)
+
+
+
+# lib/extensions/statuses.rb
+class ActiveRecord::Base
+  def self.has_statuses(*status_names)
+    validates :status, :presence => true, :inclusion => { :in => status_names }
+    # Status Finders
+    status_names.each do |status_name|
+      scope "all_#{status_name}", where(:status => status_name)
+    end
+    # Status Accessors
+    status_names.each do |status_name|
+      define_method "#{status_name}?" do
+        status == status_name
+      end
+    end
+  end
+end
+
+
+class Purchase < ActiveRecord::Base
+  has_statuses :in_progress, :submitted, :approved, :shipped, :received
+end
+
+
+
+7, using the template pattern
+
+giả sử rằng car có gia tốc là 10, vận tốc max là 100, còn bike gia tốc là 1, vận tốc max là 20
+thì phải viết module drivable như sau và thêm 2 method vào mỗi class mà include module
+
+# lib/drivable.rb
+
+module Drivable
+  extend ActiveSupport::Concern
+  included do
+    ...
+  end
+
+  ...
+
+  def accelerate
+    self.speed = [speed + acceleration, top_speed].min
+  end
+end
+
+class Car < ActiveRecord::Base
+  include Drivable
+  ...
+  def top_speed
+    100
+  end
+
+  def acceleration
+    10
+  end
+end
+
+dùng acceleration, và top_speed chính là đang dùng template pattern trong module, khi dùng template patern thì phải định nghĩa
+các methods đó trong các class, chúng được gọi là các template methods 
+
+

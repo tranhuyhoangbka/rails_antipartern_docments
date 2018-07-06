@@ -1,0 +1,253 @@
+Sách này dùng Shoulda library
+
+1, AntiPattern: Fixture Blues
+
+- use context
+
+context "A user" do
+  setup { @user = User.create!(:name => "Bob") }
+  should "not be allowed to edit another user's post" do
+    @post = Post.create!(:title => "A Post")
+    assert !@post.editable_by?(@user)
+  end
+
+  should "return false on #has_posted?" do
+    assert !@user.has_posted?
+  end
+
+  context "with a post" do
+    setup { @post = Post.create!(:title => "A Post", :user => @user) }
+    should "be allowed to edit the post" do
+      assert @post.editable_by?(@user)
+    end
+  end
+end
+
+==============
+
+context "on GET to #show" do
+  setup { get :show, :id => @mother.to_param }
+  should "respond successfully" do
+    assert_response :success
+  end
+
+  should "only show good children" do
+    assert assigns(:children)
+    assigns(:children).each do |child|
+      assert child.good?
+    end
+  end
+end
+
+2, Cucumber framework (http://cukes.info)
+intergration test
+
+context "given an article with an average score of 4" do
+  setup do
+    @article = Factory(:article)
+    @article.stubs(:score => 4)
+    Article.stubs(:find).with(@article.id).returns(@article)
+  end
+end
+
+@article.stubs(:save).returns(true)
+
+Đặc điểm của mock stub là fake các object và fake hành vi của object mà ko hề động chạm đến database vì vậy về perfomance là sẽ tốt hơn 
+
+3, AntiPattern: Untested Rake
+có 2 trở ngại cho việc test rake 
+1 là script sống bên ngoài app , test chúng phức tạp hơn 1 methos trên 1 class
+2 là rake tast đó hoàn thành 1 toán tử qua network, hoặc lấy 1 file system, do đó bạn phải quan tâm tới việc ngăn chăn các ảnh hưởng phụ khi chạy test
+
+# lib/tasks/twitter.rake
+namespace :twitter do
+  task :search => :environment do
+    puts "Searching twitter."
+    Twitter.search("@tsaleh").each do |result|
+      puts "Processing #{result.inspect}."
+      alert = Alert.create(:body => result)
+      alert.save_cache_file!
+    end
+    puts "All done!"
+  end
+end
+
+==================>>
+
+# test/unit/twitter_task_test.rb
+class TwitterTaskTest < ActiveSupport::TestCase
+# Required because the rake task is being
+# run outside of the transaction.
+  self.use_transactional_fixtures = false
+  context "rake twitter:search" do
+    setup do
+      # How slow is this going to be? Very.
+      @out = `cd #{Rails.root} && rake twitter:search 2>&1`
+    end
+
+    should "print a message at the beginning" do
+      assert_match /Searching/i, @out
+    end
+
+    should "save some cache files" do
+      # Search the filesystem for the cached files.
+    end
+
+    should "find all tweets containing @tsaleh" do
+      # this one would be based entirely on luck.
+    end
+
+    should "print a message when done" do
+      assert_match /all done/i, @out
+    end
+  end
+end
+
+
+các vấn đề
+- phải dùng 1 số thủ thuật, mất nhiều thời gian, code test phình to, runtime của test lớn
+- để chạy thì cần phải chuẩn bị các file để access, remove các file đã create hoặc edit sau khi test kết thúc
+- bởi vì bạn ko cùng trong process như code mà bạn đang test, nên ko có cách nào để dùng mocking và stubbing. Vì vậy 1 số actions, như 
+network access, hoặc ko được test well, hoặc ko stop được
+- bất kỳ database acceess bởi rake task được thực thông qua 1 new connection , vì vậy transaction của test sẽ ko ảnh hưởng tới rake task, và bất kỳ thay đổi nó tạo ra sẽ sót lại khi mà test kết thúc
+- bạn phải thật tin tưởng rằng rake task là đã thưc sự ok rồi và tin rằng nó sẽ ko ảnh hưởng tới các phần khác của hệ thống
+
+3.1, Solution: Extract to a Class Method
+
+Các rake task đều có thể move vào 1 model nào đó hoặc 1 class mới 
+
+
+
+# app/models/alert.rb
+class Alert < ActiveRecord::Base
+  def self.create_all_from_twitter_search(output = $stdout)
+    output.puts "Searching twitter."
+    Twitter.search("@tsaleh").each do |result|
+      output.puts "Processing #{result.inspect}."
+      alert = create(:body => result)
+      alert.save_cache_file!
+    end
+    output.puts "All done!"
+  end
+
+  def save_cache_file!
+    #   Removes a file from the filesystem.
+  end
+
+end
+
+# lib/tasks/twitter.rake
+namespace :twitter do
+  task :search => :environment do
+    Alert.create_all_from_twitter_search
+  end
+end
+
+Lúc này bạn đang chạy trong cùng process như các tests và bất kỳ database access hoàn toàn được đóng gói trong transaction của test
+
+4, AntiPattern: Unprotected Jewels
+
+phần này liên quan tới việc viết test cho gem, plugin 
+
+4.1, Solution: Write Normal Unit Tests Without Rails
+
+test_helper.rb
+
+# test/test_helper.rb
+require 'rubygems'
+require 'test/unit'
+require 'shoulda'
+require 'lorem_ipsum'
+
+# test/lorem_ipsum_test.rb
+
+require 'test_helper'
+class LoremIpsumTest < Test::Unit::TestCase
+  include LoremIpsum
+
+  context "lorem_ipsum" do
+    setup { @output = lorem_ipsum }
+      should "return some lorem ipsum text" do
+        assert_match /lorem ipsum/i, @output
+      end
+
+      should "not include line breaks" do
+        assert_no_match /\n/i, @output
+      end
+   end
+end 
+
+4.2, Solution: Load Only the Parts of Rails You Need
+Only use active_record 
+
+
+
+# slugalicious/test/test_helper.rb
+require 'rubygems'
+
+# Only load ActiveRecord
+require 'active_record'
+
+# Grab some other gems to help with our tests
+require 'shoulda'
+require 'shoulda/active_record'
+require 'factory_girl'
+# Require the plugin file, itself
+require 'slugalicious'
+
+BASE = File.dirname(__FILE__)
+# Configure Factory Girl
+require BASE + "/factories.rb"
+
+# Configure the logger
+ActiveRecord::Base.logger = Logger.new(BASE + "/debug.log")
+RAILS_DEFAULT_LOGGER = ActiveRecord::Base.logger
+
+# Establish the database connection
+config = YAML::load_file(BASE + '/database.yml')
+ActiveRecord::Base.establish_connection(config['sqlite3'])
+# Load the database schema
+load(BASE + "/schema.rb")
+
+=====================
+
+#test/factories.rb
+Factory.define :post do |f|
+  f.title "New post"
+end
+
+
+#test/database.yml
+sqlite3:
+  adapter: sqlite3
+  database: ":memory:"
+
+
+#test/slugalicious_test.rb
+class Post < ActiveRecord::Base
+  # has title, slug, and body, as described in schema.rb
+  include Slugalicious
+end
+
+
+class PostTest < ActiveRecord::TestCase
+  setup { Post.destroy_all }
+  should validate_presence_of(:slug)
+  should allow_value("one-two").for(:slug)
+
+  should "set the slug from the title" do
+    post = Factory(:post, :title => "This is a 'title'.")
+    assert_equal "this-is-a-title", post.slug
+  end
+end
+
+
+4.2, Solution: Break Out the Atom Bomb
+
+- Embed a Complete Rails Application in Your Tests
+- tạo 1 app rails đơn giản trong test folder sau đó dùng gem trong app đó, sau đó viết test 
+
+*******************
+Embed a Complete Rails Application in Your Tests
+
+

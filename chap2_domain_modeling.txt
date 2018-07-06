@@ -1,0 +1,40 @@
+1, AntiPattern: Authorization Astronaut
+
+2, Các hướng dẫn:
+- Không bao giờ vượt quá các requirements của ứng dụng ở thời điểm bạn đang viết code
+- Nếu bạn không có các requirements cụ thể, đừng viết bất kỳ code gì
+- Đừng vội vã tạo 1 model mới, thường có 1 số cách đơn giản như tạo các boolean fields, hoặc 
+denormalization (TYPES = %w(admin editor writer guest) in role model) để tránh việc phải dùng thêm models
+- Nếu không có 1 user interface (màn hình ) để thêm, xóa, quản lý data không cần thiết phải dùng 1 model,
+1 denormalized column với các giá trị được lưu trữ trong hash hoặc array trong model là đủ
+
+3, AntiPattern: The Million-Model March
+3.1, Solution: Denormalize into Text Fields
+
+class Article < ActiveRecord::Base
+  belongs_to :state
+  belongs_to :category
+  validates :state_id, :presence => true
+  validates :category_id, :presence => true
+end
+
+class State < ActiveRecord::Base
+  has_many :articles
+end
+
+class Category < ActiveRecord::Base
+  has_many :articles
+end
+
+@article.state = State.find_by_name("published")
+
+Vấn đề ở đây là state không đáng để lưu vào database với 1 model riêng, vì không cần thiết phải có màn hình quản lý cho state 
+vì vậy thay đổi bằng cách denormalized state vào trong 1 field của article 
+
+3.2, Dùng serialize 
+Thích hợp cho các trường hợp như versioning, đơn giản hóa các lưu trữ phức tạp, open_ended data (dữ liệu quá khứ log)
+
+Nhược điểm là không có khả năng thực hiện search trong serialize data , nhưng bù lại nó làm giảm thiểu số model phải tạo 
+
+
+

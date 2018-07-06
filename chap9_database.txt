@@ -1,0 +1,16 @@
+1, AntiPattern: Messy Migrations
+
+1.1, Solution: Never Modify the up Method on a Committed Migration
+
+1.2, Solution: Never Use External Code in a Migration
+migration file chỉ để phục vụ cho việc thay đổi cấu trúc db tuyệt đối ko được chứ logic ruby khác 
+
+2, AntiPattern: Wet Validations
+
+Không nên duplicate validation từ model vào trong database 
+
+2.1, Solution: Eschew Constraints in the Database
+
+Hạn chế dùng constraints trong db
+
+2.2, There’s Always an Exception

@@ -1,0 +1,76 @@
+1, Solution: Learn About the View Helpers That Come with Rails
+
+content_for and yield 
+if content_for(:title).blank?
+
+2, Solution: Add Useful Accessors to Your Models
+Các logic ngoài view có thể chuyển đến helper nhưng nếu liên quan tới 1 model cụ thể nào đó thì chuyển logic đó vào model 
+trong trường hợp logic đó liên quan tới model nhưng vẫn chỉ liên quan tới presentation thì vẫn để nó ở helper
+
+3, Solution: Extract into Custom Helpers
+dùng content_tag
+nếu 1 view phức tạp thì dùng view partial thay thế chứ ko dùng content_tag 
+
+4, AntiPattern: Markup Mayhem
+
+Khi dùng content_tag thì có thể biến đổi link_to về content_tag :a 
+vì mục địch dễ đọc cấu trúc markup
+
+4.1, chú ý:
+- Mọi phần tử trong page mà gói nội dung xác định nên có 1 class hoặc id để đặc trưng cho nội dung đó
+- các tag tốt là các tag được dùng cho đúng content
+- style nên được done ở css file chứ ko bao giờ nằm trực tiếp ở phần tử
+
+4.2, semantic mean tag
+h1, p là các tag có ngữ nghĩa, còn các tag như div, span ko có ngữ nghĩa nên cần thiết cho chúng class hoặc id 
+
+4.3, đánh giá semantic mean của page
+1 cách đánh giá là khi bỏ đi tất cả content của tag chỉ còn lại duy nhất bộ khung của tag, mà ngữ nghĩa thông qua tag và id, class
+biểu lộ được nhiều thì ok 
+
+mục tiêu của web design là site có thể hoàn toàn restyle là mà ko thay đổi cấu trúc html , chỉ cần css thay đổi .
+với khung html có nhiều ngữ nghĩa thì mục tiêu đó hoàn toàn có thể 
+
+Có thể chấp nhận javascript nhưng chúng phải được viết riêng trong javascript file 
+
+5, Solution: Giữ html semantic dùng Rails Helpers
+
+Dùng div_for và content_tag_for, dom_id, dom_class 
+
+Ví dụ:
+
+<div class="post" id="post_<%= @post.id %>">
+  <h2 class="title">Title</h2>
+  <div class="body">
+    Lorem ipsum dolor sit amet, consectetur...
+  </div>
+  <ol class="comments">
+    <% @post.comments.each do |comment| %>
+      <li class="comment" id="comment_<%= comment.id %>">
+        <%= comment.body %>
+      </li>
+    <% end %>
+  </ol>
+</div>
+
+=> thay bằng
+
+<%= div_for @post do %>
+  <h2 class="title">Title</h2>
+  <div class="body">
+    Lorem ipsum dolor sit amet, consectetur...
+  </div>
+  <ol class="comments">
+    <% @post.comments do |comment| %>
+      <%= content_tag_for :li, comment do %>
+        <%= comment.body %>
+      <% end %>
+    <% end %>
+  </ol>
+<% end %>
+
+6, Solution: Use Haml
+
+[] với 1 object bên trong được dùng như div_for, content_for
+%div[@user] => div class=user id=user_1
+

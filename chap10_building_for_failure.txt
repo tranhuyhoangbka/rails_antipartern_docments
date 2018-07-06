@@ -1,0 +1,17 @@
+1, AntiPattern: Continual Catastrophe
+
+2, AntiPattern: Inaudible Failures
+
+class ApplicationController < ActionController::Base
+  rescue_from ActiveRecord::RecordInvalid, :with => :show_errors
+
+3, Never Rescue nil
+
+order_number = order.place! rescue nil
+
+Nó sẽ ẩn đi lỗi mà ko biết nguyên do là gì 
+
+dùng rescue mà ko liệt kê chính xác exceptions để catch  là gì 
+
+
+4, Big Brother Is Watching

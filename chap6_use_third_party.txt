@@ -1,0 +1,67 @@
+Nói về gem và plugin
+Nó rất đáng giá để dùng 1 gem đã tồn tại để giải quyết vấn đề 
+
+1, AntiPattern: Recutting the Gem
+
+1.1, Solution: Look for a Gem First
+trước khi bắt đầu 1 chức năng nên tìm xem có gem nào cung cấp chức năng bạn cần ko ?
+không nên dùng nhiều thời gian để viết code trong khi đã có gem hỗ trợ 
+
+2, AntiPattern: Amateur Gemologist
+
+2.1, Solution: Follow TAM
+có 3 hướng dẫn để đáng giá 1 gem: test, activity, maturity 
+
+- Check tests: kiểm tra xem gem có test đầy đủ chưa
+
+- check activity: gồm các yếu tố như: ít có hoạt động trong source code, có các tickets lỗi, mail list điều này thể hiện rằng code đã lỗi thời 
+
+- Check for Maturity: time và usage là nhân tố đánh giá xem gem có ổn không, có nghĩa là: gem đã viết được 1 thời gian, thường được
+maintain, có nhiều users 
+
+3, AntiPattern: Vendor Junk Drawer
+
+3.1, Solution: Prune Irrelevant or Unused Gems
+bỏ bớt các gem ko sử dụng, không để code của thirdparty trở nên phình to (lib, vender dir, Gemfile), nên chú ý đến nó
+
+3.2, AntiPattern: Miscreant Modification (sự thay đổi tùy tiện)
+
+- Solution: Consider Vendored Code Sacrosanct
+không bao giờ nên thay đổi code của gem hoặc plugin một cách trực tiếp vì như thế sẽ bị lệch khi mà upgrade version
+
+Có 2 kĩ thuật để tạo những thay đổi code cần thiết cho third-party code:
+
+- Monkey patching:
+
+Là 1 kỹ thuật lập trình mà có thể dùng trong các ngôn ngữ động. Với monkey patching, bạn có thể thay đổi hoặc mở rộng code đang tồn tại ở
+thời điểm runtime, mà ko thay đổi original code. Trong ruby có thể thực hiện điều này bằng cách reopen 1 class hoặc module và cung 
+cấp code thay đổi 
+Nên đặt monkey patching vào lib, tên file biểu thị những gì cần patched. Chú ý là chỉ cần overide những code cần thiết chứ ko cần
+phải viết cả lại original code, và cố gắng thay đổi càng ít càng tốt
+
+vd:  lib/validatable_extensions.rb
+
+module Validatable
+  class ValidatesNumericalityOf < ValidationBase #:nodoc:
+    option :only_integer
+
+    def valid?(instance)
+      value = value_for(instance)
+
+...
+end
+
+
+- Forking 
+
+Khi gem có 1 bug, bạn có thể đóng góp các thay đổi tới open source project để các thay đổi đó được merge. Nhớ là phải có test đầy đủ
+đầu tiên phải fork original code, tạo các thay đổi, commit push, tạo pull request. Cũng ko cần phải chờ đến lúc được merge mới có
+thể sử dụng được gem với các chỉnh sửa vừa rồi, bundler có khả năng trỏ tới git repo thay thế gem 
+
+gem 'gemname', git: 'git://github.com/githubuser/gemname.git'
+
+
+
+- 
+
+

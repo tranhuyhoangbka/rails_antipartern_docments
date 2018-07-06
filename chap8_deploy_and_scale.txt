@@ -1,0 +1,236 @@
+1, database improve
+
+a) Những column nên được đánh index: 
+- primary key, foreign_key, 
+- Các columns được dùng trong polymorphic conditional joins 
+
+class Tagging < ActiveRecord::Base
+  belongs_to :tag
+  belongs_to :taggable, :polymorphic => true
+end 
+
+class Comment < ActiveRecord::Base
+  has_many :taggings, :as => :taggable
+end
+
+các columns trong bảng taggings: taggable_id và taggable_type cần đươc đánh index 
+
+class AddindexesToAllPolymorphicTables < ActiveRecord::Migration
+  def self.up
+    add_index :taggings, :tag_id
+    add_index :taggings, [:taggable_id, :taggable_type]
+  end
+end
+
+- Các columns được dùng trong Uniqueness validations
+validates :email, uniqueness: true
+
+column email nên được đánh index
+
+- Các column được dùng trong STI (single table inherit)
+type column trong parent table nên được đánh index
+
+- Các column được dùng bởi to_param 
+column để tạo pretty url
+
+- Các column được dùng trong where clauses 
+Không phải tất cả các column trong where sẽ được đánh index, nhưng nên đầu tư thời gian cho where condition để xem xét xem có
+đánh được index cho column nào không 
+
++ State columns 
+
+1 article có thể có các trạng thái lkaf draft, submitted, published, unpublished (đã approve sau đó lại cho xuống)
+có thể index column status, hoặc [user_id, status] của articles table
+
++ Boolean columns
+
++ DAtetime columns
+
+nếu có các query để tìm các articles mới nhất ORDER BY created_at DESC
+hoặc tìm các bài viết trong tuần WHERE created_at >= "2010-10-27 00:00:00"
+thì cần thiết đánh index cho created_at column 
+
+
+Việc đánh index sẽ giúp cho query nhanh hơn, nhưng bù lại nó lại làm cho quá trình thêm dữ liệu chậm đi 
+ví dụ thêm index cho bảng 12 triệu row mất 7 tiếng 
+
+
+1.2, Phát hiện index bị missing
+
+a) có 1 số took như Limerick Rake (http://github.com/thoughtbot/limerick_rake) cung cấp task db:indexes:missing 
+
+b) bạn cũng có thể bật mysql slow query loggin, nó được miêu tả trong http://dev.mysql.com/doc/refman/5.1/en/slow-query-log.html, its sidekick log-queries-not-using-indexes, 
+nếu bạn thêm các config sau tới mysql configuration , mysql sẽ chú ý các query mà lấy nhiều thời gian hoặc ko dùng bất kỳ index
+
+log_slow_queries = /var/log/mysql/mysql-slow.log
+log-queries-not-using-indexes
+
+Log này sẽ là 1 chỉ dẫn quan trọng đến việc missing index
+
+c) Có 2 rails plugin mà sẽ in ra explain statements của mọi query được dùng để render 1 page . Nó có thể giúp giải quyết 1 số vấn đề
+Rails Footnotes (http://github.com/josevalim/rails-footnotes)
+QueryReviewer (http://github.com/dsboulder/query_reviewer)
+
+d) Dùng New Relic RPM 
+nó là 1 rails plugin mà phân tích performance của ứng dụng và send thông tin đó tới New Relic RPM service cho phân tích và điều khiển
+bạn có thể sau đó log vào trong service và quan sát các vấn đề liên quan tới performance
+
+2, Solution: Reassess Your Domain Model
+Số lượng row có trong 1 table và số lượng table trong sql query là các nhân tố quan trọng liên quan tới speed của queries.
+
+Do đó cần xem xét lại domain modeling để cải thiện performance 
+
+Article.includes([:state, :category]).where("states.name" => "published",
+  "categories.name" => "hiking",
+  "articles.user_id" => current_user)
+
+Có thể viết lại:
+
+published_state = State.find_by_name('published')
+hiking_category = Category.find_by_name('hiking')
+
+Article.where("state_id" => published_state, "category_id" => hiking_category,
+"user_id" => current_user)
+
+
+2.1, N+1 problem
+
+Dùng eager loading
+
+Article.includes([:state, :category, :user])
+
+includes sẽ gọi eager loads state, category, user của mỗi article bằng việc join các table tương ứng đó, và load tất cả data từ nó vào
+model instance:
+
+
+2.2, Learn to Love the Denormalized Dataset
+
+các model category và state chỉ có dữ liệu cố định và ko được thêm nữa, vì vậy có thể denormalize domain để hạn chế số lượng models 
+
+class Article < ActiveRecord::Base
+  STATES = %w(draft review published archived)
+  CATEGORIES = %w(tips faqs misc hiking)
+  validates :state, :inclusion => {:in => STATES}
+  validates :category, :inclusion => {:in => CATEGORIES}
+end
+
+
+3, AntiPattern: Painful Performance
+
+3.1, Solution: Don’t Do in Ruby What You Can Do in SQL
+
+1 lỗi chúng ta hay gặp là thực hiện các thao tác trên ruby mà có thể thực hiện trên sql thay thế
+
+@article.comments.count: sẽ raise ra sql count trên relationships @article.comments 
+@article.comments.length: ko được định nghĩa trên ActiveRecord relationships, nó load all records trong relationship và gọi length method trên collection: đây là method performance tồi nhất, tiềm ẩn việc load hàng nghìn objects vào bộ nhớ
+
+@article.comments.size: gọi length trên collection của items trong relationship nếu nó đã được load rồi, ko thì sẽ gọi count 
+
+3.2, Laziness
+
+ví dụ: poor performance
+
+@account = Account.find(3)
+@users = @account.users.sort { |a,b| a.name.downcase <=> b.name.downcase }.first(5)
+dùng ruby để sort chậm lại còn tăng gấp đôi bộ nhớ sử dụng
+
+=>
+
+@users = @account.users.order('LCASE(name)').limit(5)
+
+
+class User < ActiveRecord::Base
+  has_many :comments
+  has_many :articles, :through => :comments
+
+  def collaborators
+    articles.collect { |a| a.users }.flatten.uniq.reject {|u| u == self }
+  end
+end
+
+=>
+
+def collaborators
+  User.select("DISTINCT users.*").joins(:comments => [:user, {:article => :comments}])
+    .where(["articles.id in ? AND users.id != ?", self.article_ids, self.id])
+end
+
+
+3.3, Solution: Move Processing into Background Jobs
+
+Có nhiều hoạt động có response time thấp là:
+
+Generating reports
+Updating lots of related data in an associated object, based on a user action
+Updating various caches
+Communicating with slower external resources
+Sending email
+
+Có thể đưa các logic này vào background job, đưa nó ra khỏi request response cycle
+
+a) cron tasks
+
+Cho các task có tính định kỳ cố định như hàng giờ, hàng ngày, hàng tháng... Dùng khái niệm cron của UNIX 
+
+b) queuing
+Phù hợp cho trường hợp ko yêu cầu đồng bộ 
+Đặt 1 job để được hoàn thành trên queue bất cứ khi nào job cần đucợ hoàn thành 
+
+các queueing system phổ biến:
+
+- delayed_job (http://github.com/tobi/delayed_job)
+- resque (http://github.com/defunkt/resque)
+
+chúng đều để tạo các background jobs, đặt các job vào queue, xử lý các queue đó. Resque được backed bởi Redis datastore, trong khi đó
+delayed_job là SQL backed
+
+Resque là ok hơn delayed_job và được dùng bởi Github 
+
+Nhắc nhở là dùng deplayed_job tới các site mà không quá 50% công việc là background job. Tuy nhiên nếu đã có Redis rồi nên xem
+xét dùng Resque . 
+
+deplayed_job:
+
+class SalesReport < Struct.new(:user)
+  def perform
+    report = generate_report
+    Mailer.sales_report(user, report).deliver
+  end
+
+  private
+
+  def generate_report
+    FasterCSV.generate do |csv|
+      csv << CSV_HEADERS
+      Sales.find_each do |sale|
+        csv << sale.to_a
+      end
+    end
+  end
+end
+
+ReportsController:
+
+def create
+  Delayed::Job.enqueue SalesReport.new(current_user)
+end
+
+*** hoặc ***
+
+class Sale < ActiveRecord::Base
+  def self.generate_report(user)
+    report = FasterCSV.generate do |csv|
+      csv << CSV_HEADERS
+      find_each do |sale|
+        csv << sale.to_a
+      end
+    end
+    Mailer.sales_report(user, report).deliver
+  end
+end
+
+controller:
+
+Sale.send_later(:generate_report, current_user)
+
+Cách tạo class mới là ok hơn vì nó tuân theo Sinle Responsibilly Principle, keep class cliean đặc biệt cho các job nhiều logic 

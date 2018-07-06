@@ -1,0 +1,180 @@
+Hiện nay, trong thế kỷ của internet bạn có thể cung cấp 1 số lượng apis và service để partner của website hoặc công đồng internet biết đến
+
+việc dùng và public các services có những cạm bẫy và vấn đề phổ biến , chapter này sẽ cover các khía cạnh của cả 2 trường hợp khi bạn
+tương tác với services (khi bạn dùng chúng hoặc khi bạn build chúng) để clean, reliable, enjoyable 
+
+1, AntiPattern: Fire and Forget
+
+1.1, Solution: Know What Exceptions to Look Out For
+
+rescue *FACEBOOK_ERRORS => facebook_error
+  HoptoadNotifier.notify facebook_error
+end
+
+HoptoadNotifier là 1 dạng giống bugsnack gửi message lên web nếu xảy ra lỗi 500 
+
+begin
+  req = Net::HTTP::Post.new(url.path)
+  req.set_form_data({'xml' => xml})
+  http = Net::HTTP.new(url.host, url.port).start
+response = http.request(req)
+  rescue *HTTP_ERRORS => e
+  HoptoadNotifier.notify e
+end
+
+==================
+exception khi gửi mail smtp
+
+SMTP_SERVER_ERRORS = [TimeoutError, IOError,
+  Net::SMTPUnknownError,
+  Net::SMTPServerBusy,
+  Net::SMTPAuthenticationError]
+
+SMTP_CLIENT_ERRORS = [Net::SMTPFatalError,
+  Net::SMTPSyntaxError]
+
+def notify_of_action(user, action)
+  begin
+    Mailer.action_notification(user, action).deliver
+  rescue *SMTP_CLIENT_EXCEPTIONS
+    flash[:warning] = "There was an issue delivering your notification. Please check the notification list settings."
+  rescue *SMTP_SERVER_EXCEPTIONS => e
+    HoptoadNotifier.notify e
+  end
+end
+
+
+** error logging service for Rails applications:
+ Hoptoad, exception_notification (http://github.com/rails/exception_notification), Exceptional (www.getexceptional.com), and New Relic (www.newrelic.com)
+
+2, AntiPattern: Sluggish Services
+Một vấn đề cần quan tâm khi tương tác với các remote services, là chúng có thể ảnh hưởng tới performce của app. Nếu netwwork chậm
+hoặc có vấn đề, nếu remote server chậm hoặc có vấn đề , performace của app sẽ bị ảnh hưởng 
+
+2.1, Solution: Set Your Timeouts
+
+default timeout of the standard Net::HTTP library is 60 seconds
+
+Nếu bạn đang có 1 remote server và ko muốn chờ nó, bạn ko care liệu kết nối đang ok (vì bạn có thể retry nó hoặc nó ko quan trọng)
+setting timeout tới 1 giá trị thấp hơn giải quyết vấn đề đó 
+
+request = Net::HTTP::Post.new(url.path)
+request.set_form_data({'xml' => xml})
+http = Net::HTTP.new(url.host, url.port).start
+http.read_timeout = 3
+response = http.request(req)
+
+2.2, Solution: Move the Task to the Background
+
+Trong trường hợp giảm timeout không phải là option và user không cần nhận feedback ngay lập tức thì việc chuyển interaction với remote server vào background task là sự lựa chọn chính xác 
+
+********
+We recommend delayed_job and Resque for background queue systems
+
+3, AntiPattern: Pitiful Page Parsing
+
+thỉnh thoảng làm việc với remote server ko đơn giản là gọi API, có những lúc ta cần parse web page thủ công và lấy về thông tin chúng ta muốn 
+
+có thể bạn sẽ dùng regexx để lấy dữ liệu: 
+require 'uri'
+require 'open-uri'
+url = 'http://theurlofthewebpage.com'
+html = open(url).read
+if html =~ /class="status"><img
+  src="\/images\/.*\.png">(.*)<\/span/
+  status = $1
+end
+
+nhưng khi markup của site thay đổi thì regex phải thay đổi lại rất là nhiều 
+
+3.1, Solution: Use a Gem
+
+Hướng giải quyết là dùng các gems chuyên biệt cho chức năng parsing 1 webpage 
+
+- Nếu cần parse 1 webpage thì dùng Nokogiri (http://nokogiri.org) có khả năng search documents via XPath or CSS3 selectors
+- Nếu cần parse nhiều pages của 1 site, following links, duy trì cookies thì dùng Mechanize gem (http://mechanize.rubyforge.org)
+để auto interaction với site . Nó có thể auto store và send cookies , follow redirecs, follow links và submit form , có cũng có thể fill và submit form . Nó dùng Nokogiri như engine parsing của nó 
+
+require 'rubygems'
+require 'nokogiri'
+require 'open-uri'
+url = 'http://theurlofthewebpage.com'
+doc = Nokogiri::HTML(open(url))
+status = doc.css('.status').first.content
+
+nokogiri cung cấp content method để lấy text của bất kỳ node nào 
+nokogiri cũng có thể parse 1 xml document 
+
+doc = Nokogiri::XML(open(url))
+
+*** với xml đến từ restful remote system request có các action GET, POST thì RestClient là (http://github.com/archiloque/rest-client) là lựa chọn tốt hơn dùng Mechanize 
+
+require 'rest_client'
+RestClient.get 'http://example.com/resource'
+RestClient.post 'http://example.com/resource', :param1 => 'one', :nested => { :param2 => 'two' }
+RestClient.delete 'http://example.com/resource'
+
+4, AntiPattern: Successful Failure
+
+def create
+  @song = songs.new(params[:song])
+  respond_to do |format|
+    if @song.save
+      format.xml { render :xml => @song, :location => @song }
+    else
+      format.xml { render :xml => @song.errors }
+    end
+  end
+end
+
+nếu create fail thì error detail sẽ được trả về cho client , client check sự hiện diện của error để xem create có success ko. Trên
+thực tế thì client ko bao giờ cần parse response để check success hay fail , Http cung cấp flag cho client check status code
+
+4.1, Solution: Obey the HTTP Codes
+
+if @song.save
+  format.xml { render :xml => @song, :status => :created, :location => @song }
+else
+  format.xml {render :xml => @song.errors, :status => :unprocessable_entity}
+end
+
+if @song.update_attributes(params[:song])
+  format.xml { head :ok }
+else
+  format.xml {render :xml => @song.errors, :status => :unprocessable_entity}
+end
+
+
+def destroy
+  respond_to do |format|
+    format.xml { head :ok }
+  end
+end
+
+status => :unauthorized, unprocessable_entity, created 
+
+4.2, Go the Distance
+
+Không chỉ cho api actions , status code cũng chấp nhận cho non-api actions
+
+def ensure_user_is_admin
+  if !current_user.admin? 
+    flash.now[:failure] = "You do not have permission to perform this action"
+    render :template => 'sessions/new', :status => :unauthorized
+  end
+end
+
+
+5, AntiPattern: Kraken Code Base
+
+5.1, Solution: Divide into Confederated Applications (phân chia code vào các apps riêng rẽ )
+
+Low-Hanging Fruit:
+
+khi một số chức năng ko liên quan tới các chức năng còn lại trong hệ thống thì có thể cắt chúng ra thành các app riêng 
+sau đó deploy và scale các apps riêng rẽ, và như vậy nếu các chức năng đó có vấn đề thì sẽ ko ảnh hưởng gì tới toàn hệ thống
+
+
+Higher Fruit:
+
+Có những sự extraction phức tạp, nơi các apps riêng lẻ phải tương tác với app khác 
